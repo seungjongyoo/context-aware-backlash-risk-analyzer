@@ -91,6 +91,9 @@ AUDIENCE_PROFILE = (
     "Public Instagram audience reading a short opinion post. Readers include casual followers, "
     "fans of the target, neutral bystanders, and people sensitive to sarcasm, dunking, or sweeping claims."
 )
+SELF_CONSISTENCY_ENABLED = True
+SELF_CONSISTENCY_RUNS = 5
+SELF_CONSISTENCY_TEMPERATURE = 0.4
 
 # Human-designed taxonomy
 DIMENSION_ORDER = [
@@ -315,6 +318,9 @@ class PipelineOutput:
     contextual_embedding_preview: List[float]
     heuristic_dimensions: Dict[str, float]
     llm_dimension_scores: Dict[str, Dict[str, float]]
+    llm_self_consistency: Dict[str, object]
+    dimension_uncertainty: Dict[str, float]
+    mean_uncertainty: float
     final_dimensions: Dict[str, float]
     validation_report: Dict[str, object]
     heuristic_risk_score: int
@@ -938,13 +944,13 @@ class QwenContextAnalyzer:
         except Exception:
             return False
 
-    def _generate_with_ollama(self, prompt: str) -> Optional[dict]:
+    def _generate_with_ollama(self, prompt: str, temperature: float = 0.2) -> Optional[dict]:
         payload = {
             "model": QWEN_OLLAMA_MODEL,
             "prompt": prompt,
             "stream": False,
             "format": "json",
-            "options": {"temperature": 0.2},
+            "options": {"temperature": float(temperature)},
         }
         req = urllib.request.Request(QWEN_OLLAMA_URL, method="POST")
         try:
@@ -981,7 +987,7 @@ class QwenContextAnalyzer:
             self._transformers_reason = "transformers-load-failed"
             return False
 
-    def _generate_with_transformers(self, prompt: str) -> Optional[dict]:
+    def _generate_with_transformers(self, prompt: str, temperature: float = 0.2) -> Optional[dict]:
         if not self._load_transformers():
             return None
         try:
@@ -990,22 +996,26 @@ class QwenContextAnalyzer:
             inputs = self._transformers_tokenizer(text, return_tensors="pt")
             if hasattr(self._transformers_model, "device"):
                 inputs = {key: value.to(self._transformers_model.device) for key, value in inputs.items()}
-            output = self._transformers_model.generate(**inputs, max_new_tokens=400, do_sample=False)
+            do_sample = float(temperature) > 0.0
+            generation_kwargs = {"max_new_tokens": 400, "do_sample": do_sample}
+            if do_sample:
+                generation_kwargs["temperature"] = max(float(temperature), 0.01)
+            output = self._transformers_model.generate(**inputs, **generation_kwargs)
             generated = output[0][inputs["input_ids"].shape[-1]:]
             decoded = self._transformers_tokenizer.decode(generated, skip_special_tokens=True)
             return extract_first_json_block(decoded)
         except Exception:
             return None
 
-    def analyze(self, prompt: str) -> Dict[str, object]:
+    def analyze(self, prompt: str, temperature: float = 0.2) -> Dict[str, object]:
         if self.backend == "disabled":
             return {"backend": "disabled", "result": None}
         if self.backend in {"auto", "ollama"} and self._can_use_ollama():
-            result = self._generate_with_ollama(prompt)
+            result = self._generate_with_ollama(prompt, temperature=temperature)
             if result is not None:
                 return {"backend": "ollama", "result": result}
         if self.backend in {"auto", "transformers"}:
-            result = self._generate_with_transformers(prompt)
+            result = self._generate_with_transformers(prompt, temperature=temperature)
             if result is not None:
                 return {"backend": "transformers", "result": result}
             if self.backend == "transformers" and self._transformers_reason:
@@ -1076,6 +1086,88 @@ def sanitize_llm_dimension_scores(payload: Optional[dict]) -> Dict[str, Dict[str
     return scores
 
 
+def run_self_consistency_llm_evaluation(
+    analyzer,
+    llm_prompt,
+    runs=SELF_CONSISTENCY_RUNS,
+) -> dict:
+    """Run multiple LLM evaluations and aggregate dimension scores.
+
+    This self-consistency upgrade samples the same rubric prompt several times,
+    then uses cross-run variation as uncertainty for validation and merging.
+    """
+    payloads = []
+    sanitized_runs = []
+    backend = "unavailable"
+    failed_count = 0
+
+    for _ in range(max(int(runs), 0)):
+        response = analyzer.analyze(llm_prompt, temperature=SELF_CONSISTENCY_TEMPERATURE)
+        backend = str(response.get("backend", backend)) if response else backend
+        payload = response.get("result") if response else None
+        if not payload:
+            failed_count += 1
+            continue
+        sanitized = sanitize_llm_dimension_scores(payload)
+        raw_scores = payload.get("dimension_scores", {}) if isinstance(payload, dict) else {}
+        if isinstance(raw_scores, dict):
+            for name in DIMENSION_ORDER:
+                if name not in raw_scores:
+                    sanitized[name]["available"] = 0.0
+        payloads.append(payload)
+        sanitized_runs.append(sanitized)
+
+    dimension_scores = {}
+    uncertainties = []
+    for name in DIMENSION_ORDER:
+        probabilities = []
+        severities = []
+        confidences = []
+        llm_risks = []
+
+        for scores in sanitized_runs:
+            score = scores.get(name, {})
+            if not score.get("available", 0.0):
+                continue
+            probability = float(score.get("probability", 0.0))
+            severity = float(score.get("severity", 0.0))
+            confidence = float(score.get("confidence", 0.0))
+            probabilities.append(probability)
+            severities.append(severity)
+            confidences.append(confidence)
+            llm_risks.append((0.70 * probability) + (0.30 * severity))
+
+        if llm_risks:
+            uncertainty = float(np.std(llm_risks))
+            uncertainties.append(uncertainty)
+            dimension_scores[name] = {
+                "probability": float(np.mean(probabilities)),
+                "severity": float(np.mean(severities)),
+                "confidence": float(np.mean(confidences)),
+                "uncertainty": uncertainty,
+                "available": 1.0,
+                "rubric_reason": f"self-consistency mean over {len(llm_risks)} runs",
+            }
+        else:
+            dimension_scores[name] = {
+                "probability": 0.0,
+                "severity": 0.0,
+                "confidence": 0.0,
+                "uncertainty": 0.0,
+                "available": 0.0,
+                "rubric_reason": "missing",
+            }
+
+    return {
+        "backend": backend,
+        "payloads": payloads,
+        "dimension_scores": dimension_scores,
+        "run_count": len(payloads),
+        "failed_count": failed_count,
+        "mean_uncertainty": float(np.mean(uncertainties)) if uncertainties else 0.0,
+    }
+
+
 def validate_llm_scores(
     heuristic_dimensions: Dict[str, float],
     llm_dimension_scores: Dict[str, Dict[str, object]],
@@ -1093,6 +1185,7 @@ def validate_llm_scores(
         probability = score.get("probability")
         severity = score.get("severity")
         confidence = score.get("confidence")
+        uncertainty = score.get("uncertainty", 0.0)
         for key, value in {"probability": probability, "severity": severity, "confidence": confidence}.items():
             if not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
                 dimension_flags[name].append("out_of_range")
@@ -1101,6 +1194,7 @@ def validate_llm_scores(
         probability = float(np.clip(probability if isinstance(probability, (int, float)) else 0.0, 0.0, 1.0))
         severity = float(np.clip(severity if isinstance(severity, (int, float)) else 0.0, 0.0, 1.0))
         confidence = float(np.clip(confidence if isinstance(confidence, (int, float)) else 0.0, 0.0, 1.0))
+        uncertainty = float(np.clip(uncertainty if isinstance(uncertainty, (int, float)) else 0.0, 0.0, 1.0))
         heuristic_score = float(heuristic_dimensions.get(name, 0.0))
         llm_risk = (0.70 * probability) + (0.30 * severity)
 
@@ -1110,6 +1204,9 @@ def validate_llm_scores(
         if confidence < 0.40:
             dimension_flags[name].append("low_confidence")
             warnings.append(f"{name}: LLM confidence is low")
+        if uncertainty >= 0.18:
+            dimension_flags[name].append("high_uncertainty")
+            warnings.append(f"{name}: LLM uncertainty is high")
         if severity >= 0.80 and probability <= 0.30:
             dimension_flags[name].append("high_severity_low_probability")
             warnings.append(f"{name}: severe if noticed, but probability is low")
@@ -1146,6 +1243,8 @@ def merge_dimension_scores(
         if "low_confidence" in flags:
             base_weight *= 0.5
         if "large_disagreement" in flags:
+            base_weight *= 0.5
+        if "high_uncertainty" in flags:
             base_weight *= 0.5
         merged[name] = float(np.clip((1.0 - base_weight) * heuristic_score + base_weight * llm_risk, 0.0, 1.0))
     return merged
@@ -1382,10 +1481,31 @@ def run_backlash_risk_pipeline(text: str, context: str = SOCIAL_CONTEXT, audienc
         cue_analysis=cue_analysis,
     )
 
-    llm_response = analyzer.analyze(llm_prompt)
-    llm_payload = llm_response.get("result") if llm_response else None
-    llm_backend = str(llm_response.get("backend", "unavailable")) if llm_response else "unavailable"
-    llm_dimension_scores = sanitize_llm_dimension_scores(llm_payload)
+    llm_self_consistency: Dict[str, object] = {
+        "backend": "disabled",
+        "payloads": [],
+        "dimension_scores": {},
+        "run_count": 0,
+        "failed_count": 0,
+        "mean_uncertainty": 0.0,
+    }
+    if SELF_CONSISTENCY_ENABLED:
+        llm_self_consistency = run_self_consistency_llm_evaluation(analyzer, llm_prompt)
+        llm_payloads = llm_self_consistency.get("payloads", [])
+        llm_payload = llm_payloads[0] if llm_payloads else None
+        llm_backend = str(llm_self_consistency.get("backend", "unavailable"))
+        llm_dimension_scores = llm_self_consistency.get("dimension_scores", {})
+        if not llm_payload:
+            llm_response = analyzer.analyze(llm_prompt)
+            llm_payload = llm_response.get("result") if llm_response else None
+            llm_backend = str(llm_response.get("backend", "unavailable")) if llm_response else "unavailable"
+            llm_dimension_scores = sanitize_llm_dimension_scores(llm_payload)
+            llm_self_consistency["fallback_single_pass"] = bool(llm_payload)
+    else:
+        llm_response = analyzer.analyze(llm_prompt)
+        llm_payload = llm_response.get("result") if llm_response else None
+        llm_backend = str(llm_response.get("backend", "unavailable")) if llm_response else "unavailable"
+        llm_dimension_scores = sanitize_llm_dimension_scores(llm_payload)
     validation_report = validate_llm_scores(heuristic_dimensions, llm_dimension_scores)
     if not llm_payload:
         validation_report["warnings"].append("LLM unavailable; using heuristic fallback")
@@ -1395,8 +1515,22 @@ def run_backlash_risk_pipeline(text: str, context: str = SOCIAL_CONTEXT, audienc
         validation_report["llm_zero_scores"] = True
     final_dimensions = merge_dimension_scores(heuristic_dimensions, llm_dimension_scores, validation_report)
 
+    dimension_uncertainty = {
+        name: float(llm_dimension_scores.get(name, {}).get("uncertainty", 0.0))
+        for name in DIMENSION_ORDER
+    }
+    mean_uncertainty = float(llm_self_consistency.get("mean_uncertainty", 0.0)) if SELF_CONSISTENCY_ENABLED else 0.0
+
     llm_risk_score = None
-    if llm_payload and isinstance(llm_payload.get("backlash_probability"), (int, float)):
+    backlash_probabilities = [
+        float(payload["backlash_probability"])
+        for payload in llm_self_consistency.get("payloads", [])
+        if isinstance(payload, dict) and isinstance(payload.get("backlash_probability"), (int, float))
+    ]
+    if SELF_CONSISTENCY_ENABLED and backlash_probabilities:
+        raw_probability = float(np.mean(backlash_probabilities))
+        llm_risk_score = int(np.clip(round(raw_probability * 100 if raw_probability <= 1 else raw_probability), 0, 100))
+    elif llm_payload and isinstance(llm_payload.get("backlash_probability"), (int, float)):
         raw_probability = float(llm_payload["backlash_probability"])
         llm_risk_score = int(np.clip(round(raw_probability * 100 if raw_probability <= 1 else raw_probability), 0, 100))
 
@@ -1438,6 +1572,9 @@ def run_backlash_risk_pipeline(text: str, context: str = SOCIAL_CONTEXT, audienc
         contextual_embedding_preview=contextual_preview,
         heuristic_dimensions=heuristic_dimensions,
         llm_dimension_scores=llm_dimension_scores,
+        llm_self_consistency=llm_self_consistency,
+        dimension_uncertainty=dimension_uncertainty,
+        mean_uncertainty=mean_uncertainty,
         final_dimensions=final_dimensions,
         validation_report=validation_report,
         heuristic_risk_score=heuristic_risk_score,

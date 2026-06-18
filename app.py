@@ -40,6 +40,8 @@ def result_to_payload(result) -> dict:
         "recommended": result.recommended_context,
         "rewrite": result.rewrite_suggestion,
         "llmBackend": result.llm_backend,
+        "meanUncertainty": round(float(getattr(result, "mean_uncertainty", 0.0)), 3),
+        "selfConsistencyRuns": int(getattr(result, "llm_self_consistency", {}).get("run_count", 0)),
         "problematicPhrases": result.problematic_phrases,
         "specialSituations": result.special_situations,
         "explanations": result.explanation_points,
@@ -51,6 +53,7 @@ def result_to_payload(result) -> dict:
                 "llmProbability": round(float(result.llm_dimension_scores[name]["probability"]), 3),
                 "llmSeverity": round(float(result.llm_dimension_scores[name]["severity"]), 3),
                 "llmConfidence": round(float(result.llm_dimension_scores[name]["confidence"]), 3),
+                "uncertainty": round(float(getattr(result, "dimension_uncertainty", {}).get(name, 0.0)), 3),
                 "rubricReason": str(result.llm_dimension_scores[name].get("rubric_reason", "")),
             }
             for name in load_pipeline()["DIMENSION_ORDER"]
@@ -271,13 +274,14 @@ def render_index() -> bytes:
           <td>${{item.final}}</td>
           <td>${{item.llmProbability}}</td>
           <td>${{item.llmConfidence}}</td>
+          <td>${{item.uncertainty}}</td>
         </tr>
       `).join("");
 
       output.innerHTML = `
         <div class="result-header">
           <div>
-            <div class="muted">${{escapeHtml(data.riskLevel)}} · ${{escapeHtml(data.llmBackend)}}</div>
+            <div class="muted">${{escapeHtml(data.riskLevel)}} · ${{escapeHtml(data.llmBackend)}} · SC ${{data.selfConsistencyRuns}} · U ${{data.meanUncertainty}}</div>
             <h2>${{escapeHtml(data.context)}}</h2>
           </div>
           <div class="score">${{data.riskScore}}</div>
@@ -291,7 +295,7 @@ def render_index() -> bytes:
         ${{renderList(data.explanations)}}
         <h3>Dimensions</h3>
         <table>
-          <thead><tr><th>Dimension</th><th>Heuristic</th><th>Final</th><th>LLM P</th><th>LLM Conf.</th></tr></thead>
+          <thead><tr><th>Dimension</th><th>Heuristic</th><th>Final</th><th>LLM P</th><th>LLM Conf.</th><th>Uncertainty</th></tr></thead>
           <tbody>${{rows}}</tbody>
         </table>
       `;
