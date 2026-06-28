@@ -1,284 +1,669 @@
 # Context-Aware Backlash Risk Analyzer
 
+> **A hybrid heuristic + LLM framework for context-aware social backlash risk analysis enhanced with Self-Consistency and uncertainty estimation.**
+
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
+![LLM](https://img.shields.io/badge/LLM-Qwen3%208B-green.svg)
+![Status](https://img.shields.io/badge/Status-Research%20Project-orange.svg)
+![License](https://img.shields.io/badge/License-MIT-lightgrey.svg)
+
+---
+
+## Paper
+
+- [Context-Aware Backlash Risk Analyzer Report](paper/Context_Aware_Backlash_Risk_Analyzer_Report.pdf)
+
 ## Overview
 
-This project implements a context-aware social backlash risk analysis system for short text inputs.
+This project implements a **Context-Aware Backlash Risk Analyzer**, a system designed to estimate the likelihood that a piece of text may trigger **social backlash** under different communication contexts.
 
-The goal is to estimate how likely a given text is to receive negative reactions, such as criticism, backlash, misinterpretation, or inappropriate-context reactions, across communication settings such as public SNS, private messages, and workplace email.
+Unlike traditional sentiment analysis, which mainly predicts positive, negative, or neutral sentiment, this analyzer evaluates whether a message is likely to receive criticism, misunderstanding, offense, or other forms of negative social reactions.
 
-Unlike traditional sentiment analysis, which focuses mainly on positive or negative polarity, this system evaluates multiple dimensions of social risk and applies bounded context-aware adjustments to the final score.
+The system combines:
 
-## System Architecture
+- **Human-designed heuristic scoring**
+- **LLM-based contextual reasoning**
+- **Confidence-aware validation**
+- **Self-Consistency aggregation**
+- **Bounded context adjustment**
 
-The runtime system consists of:
+to generate **stable, interpretable, and context-aware risk assessments**.
 
-- `app.py`: a lightweight local web interface served at `http://127.0.0.1:8000`
-- `pipeline.py`: the production scoring pipeline
+The latest version introduces **Self-Consistency**, allowing the system to perform multiple independent LLM evaluations and estimate both the **final risk score** and the **uncertainty** of the prediction.
 
-The pipeline follows this flow:
+---
+
+#  Key Features
+
+-  Context-aware backlash risk assessment
+-  Seven interpretable risk dimensions
+-  Hybrid heuristic + LLM evaluation
+-  Validation layer for reliable LLM integration
+-  Self-Consistency using five independent LLM evaluations
+-  Uncertainty estimation based on score variance
+- Bounded context-aware score adjustment
+-  Explainable and interpretable decision process
+
+---
+
+#  Motivation
+
+Online communication increasingly occurs through social media, workplace emails, messaging applications, and online communities.
+
+However, the same sentence may receive completely different reactions depending on **where**, **how**, and **to whom** it is delivered.
+
+For example,
+
+> "That's interesting."
+
+may be interpreted as
+
+- genuine curiosity,
+- sarcasm,
+- passive aggression,
+- or criticism,
+
+depending on its communication context.
+
+Traditional sentiment analysis often fails to capture these subtle context-dependent risks because it focuses primarily on emotional polarity rather than **social interpretation**.
+
+This project addresses this limitation by estimating **social backlash risk** through:
+
+- linguistic analysis,
+- contextual reasoning,
+- multiple social-risk dimensions,
+- and repeated LLM evaluation.
+
+---
+
+#  System Architecture
+
+The runtime system consists of two primary components.
+
+| Component | Description |
+|-----------|-------------|
+| `app.py` | Lightweight web interface for user interaction |
+| `pipeline.py` | Production risk analysis pipeline |
+
+The overall design philosophy is
+
+```text
+Human-designed Heuristics
+            +
+LLM-assisted Evaluation
+            +
+Validation
+            +
+Self-Consistency
+            +
+Context-aware Adjustment
+```
+
+Rather than allowing the language model to directly determine the final score, the analyzer constrains LLM outputs using deterministic heuristic scoring, confidence-aware validation, and bounded aggregation.
+
+This hybrid design significantly improves both **robustness** and **interpretability**.
+
+---
+
+#  Overall Pipeline
+
+The upgraded pipeline is shown below.
+
+```text
+                Input Text
+                    │
+                    ▼
+             Text Preprocessing
+                    │
+                    ▼
+             Tokenization
+                    │
+                    ▼
+              Cue Extraction
+                    │
+                    ▼
+     Sentence & Context Embedding
+                    │
+                    ▼
+          Heuristic Scoring
+                    │
+                    ▼
+     LLM-based Evaluation (×5)
+                    │
+                    ▼
+          Validation Layer
+                    │
+                    ▼
+     Self-Consistency Aggregation
+                    │
+                    ▼
+            Score Merging
+                    │
+                    ▼
+        Context-aware Adjustment
+                    │
+                    ▼
+             Final Risk Score
+                    +
+          Uncertainty Estimate
+```
+
+Compared with the baseline system, the upgraded version introduces **Self-Consistency**, which performs five independent LLM evaluations before generating the final prediction.
+
+This approach reduces stochastic variation while preserving contextual reasoning.
+
+---
+
+#  Risk Dimensions
+
+Instead of predicting only sentiment polarity, the analyzer evaluates seven dimensions that commonly contribute to social backlash.
+
+| Dimension | Description |
+|-----------|-------------|
+| **Aggression** | Hostile, insulting, or confrontational language |
+| **Group Generalization** | Stereotypes or broad claims targeting social groups |
+| **Sarcasm / Mockery** | Sarcastic, ironic, or mocking expressions |
+| **Overconfident Judgment** | Excessively certain or absolute statements |
+| **Context Inappropriateness** | Expressions unsuitable for the communication context |
+| **Misinterpretability** | Statements likely to be misunderstood |
+| **Norm Violation** | Language violating common social norms or etiquette |
+
+Each dimension contributes independently to the final backlash risk score.
+
+This multi-dimensional framework provides significantly richer analysis than conventional polarity-based sentiment classification.
+
+---
+
+#  Scoring Method
+
+The analyzer estimates backlash risk through a multi-stage scoring pipeline rather than relying on a single prediction.
+
+Instead of trusting an LLM alone, the final decision is produced by combining deterministic heuristics, LLM reasoning, validation logic, and Self-Consistency aggregation.
+
+The scoring process consists of the following stages.
+
+---
+
+## 1. Heuristic Scoring
+
+The first stage computes an initial risk estimate using deterministic rules and semantic similarity.
+
+The heuristic module evaluates linguistic signals such as:
+
+- Semantic similarity through prototype matching
+- Contextual embedding similarity
+- Punctuation patterns
+- Emoji usage
+- Slang-like expressions
+- Vague targeting
+- Short-post characteristics
+- Context-level dimension multipliers
+
+When available, embeddings are generated using:
+
+```text
+sentence-transformers/all-MiniLM-L6-v2
+```
+
+If optional dependencies are unavailable, the system automatically falls back to a lightweight TF-IDF style vectorizer.
+
+The heuristic score provides a stable baseline that is independent of LLM behavior.
+
+---
+
+## 2. LLM-Based Evaluation
+
+The analyzer uses a Large Language Model as an additional reasoning component.
+
+The default backend is
+
+```text
+Ollama
+└── qwen3:8b
+```
+
+For each social-risk dimension, the LLM predicts:
+
+- Probability
+- Severity
+- Confidence
+
+The dimension-level LLM risk is computed as
+
+```text
+LLM Risk = 0.7 × Probability + 0.3 × Severity
+```
+
+Unlike many LLM-only systems, the model **does not directly determine the final score**.
+
+Instead, it acts as a supporting evaluator whose outputs are verified before being incorporated into the final prediction.
+
+---
+
+## 3. Validation Layer
+
+Since LLM outputs can vary across repeated executions, every prediction passes through a validation layer before score aggregation.
+
+The system reduces the influence of the LLM when:
+
+- confidence is low
+- heuristic and LLM scores strongly disagree
+- the LLM is unavailable
+- invalid outputs are produced
+- all dimension scores are zero
+
+This validation stage prevents unreliable LLM responses from dominating the final result.
+
+---
+
+#  Self-Consistency
+
+The primary contribution of the upgraded version is the introduction of **Self-Consistency**.
+
+Instead of relying on a single stochastic LLM response, the analyzer performs **five independent evaluations** using the same prompt.
 
 ```text
 Input
--> Preprocessing
--> Tokenization
--> Cue Extraction
--> Embedding (sentence + contextual)
--> Heuristic Scoring
--> LLM-based Evaluation
--> Validation
--> Score Merging
--> Context Adjustment
--> Final Risk Score
+   │
+   ▼
+LLM Evaluation #1
+LLM Evaluation #2
+LLM Evaluation #3
+LLM Evaluation #4
+LLM Evaluation #5
+        │
+        ▼
+ Self-Consistency Aggregation
 ```
 
-The design principle is:
+The five independent outputs are aggregated to produce a more reliable prediction.
+
+This approach significantly reduces random variation caused by probabilistic decoding.
+
+---
+
+## Final Risk Score
+
+Let
+
+- s_i be the risk score produced by the i-th evaluation.
+- N be the number of evaluations.
+
+The final score is computed as the average of all evaluations.
 
 ```text
-Human-designed structure + LLM-assisted evaluation
+Final Score = Mean(Risk Scores)
 ```
 
-## Risk Dimensions
+Using multiple independent evaluations produces a considerably more stable estimate than relying on a single LLM response.
 
-The system evaluates seven social-risk dimensions:
+---
 
-- Aggression
-- Group Generalization
-- Sarcasm / Mockery
-- Overconfident Judgment
-- Context Inappropriateness
-- Misinterpretability
-- Norm Violation
+#  Uncertainty Estimation
 
-Each dimension represents a different type of social risk that may trigger negative reactions.
+In addition to the final score, the upgraded analyzer estimates the consistency of the prediction.
 
-## Scoring Method
-
-### 1. Heuristic Scoring
-
-Heuristic scores are computed using:
-
-- semantic similarity through prototype matching
-- contextual embedding comparison
-- surface signals such as punctuation, vague targeting, emoji, slang-like cues, and short-post structure
-- context-level dimension multipliers
-
-The embedding layer uses `sentence-transformers/all-MiniLM-L6-v2` when available. If optional dependencies are unavailable, the pipeline falls back to a lightweight TF-IDF style vectorizer.
-
-### 2. LLM-Based Evaluation
-
-The default LLM backend is Ollama with `qwen3:8b`.
-
-The LLM evaluates each dimension using:
-
-- probability: likelihood that readers perceive the risk
-- severity: impact if the risk is perceived
-- confidence: reliability of the judgment
-
-LLM risk is computed as:
+Uncertainty is computed as the standard deviation of the five risk scores.
 
 ```text
-LLM Risk = 0.7 * probability + 0.3 * severity
+Uncertainty = Standard Deviation(Risk Scores)
 ```
 
-The LLM does not directly determine the final score.
+Interpretation:
 
-### 3. Validation Layer
+| Uncertainty | Interpretation |
+|-------------|---------------|
+| Low | Stable prediction with high agreement across evaluations |
+| Medium | Moderate disagreement between reasoning paths |
+| High | Prediction is sensitive to stochastic LLM behavior |
 
-LLM outputs are validated before merging.
+This additional metric provides users with an estimate of **prediction reliability**, which was unavailable in the baseline system.
 
-The system reduces LLM influence when:
+---
 
-- confidence is low
-- there is large disagreement with heuristic scores
-- the LLM is unavailable
-- the LLM returns zero-valued or unusable scores
+#  Score Merging
 
-This prevents unstable or unreliable LLM behavior from dominating the result.
-
-### 4. Score Merging
-
-Final dimension scores are computed as:
+The final dimension score is obtained by combining heuristic and validated LLM estimates.
 
 ```text
-Final = (1 - w) * Heuristic + w * LLM
+Final Dimension Score
+
+=
+
+(1 − w) × Heuristic
+
++
+
+w × LLM
 ```
 
-The weight `w` depends on LLM confidence and validation results. Reliable LLM outputs receive more influence, while low-confidence or inconsistent outputs are suppressed.
+where the weight **w** depends on:
 
-### 5. Final Risk Score
+- LLM confidence
+- validation results
+- agreement with heuristic scoring
 
-The overall base risk score is computed using weighted aggregation across all dimensions.
+Reliable LLM outputs receive greater influence, while uncertain predictions are automatically down-weighted.
 
-Context then adjusts the score using a bounded bias:
+---
 
-```text
-Final Score = 0.8 * Base Score + 0.2 * Context Adjustment
-```
+#  Context-aware Adjustment
 
-A lower bound is enforced:
+After dimension-level aggregation, the analyzer applies a bounded context adjustment.
 
-```text
-Final Score >= 0.7 * Base Score
-```
+Communication contexts include:
 
-This prevents private contexts from unrealistically reducing highly toxic text to near-zero risk.
+- SNS / Public
+- SNS / Private
+- Email / Public
+- Email / Private
+- Message / Public
+- Message / Private
 
-## Context Handling
+Internally, these contexts are mapped into three context groups.
 
-The web UI collects:
+| Context | Internal Bucket |
+|----------|----------------|
+| Public SNS | `public_social` |
+| Workplace Email | `workplace` |
+| Private Messages | `private_chat` |
 
-- Category: `SNS`, `Email`, or `Message`
-- Scope of Disclosure: `public` or `private`
+Public and workplace environments generally increase social sensitivity.
 
-These are converted into context strings such as:
+Private communication reduces the final score, but only within predefined bounds.
 
-```text
-SNS / Public
-Email / Private
-Message / Public
-```
+The adjustment is intentionally limited so that highly offensive messages cannot be incorrectly classified as low risk simply because they occur in private conversations.
 
-Internally, contexts are mapped into buckets:
+---
 
-- `public_social`
-- `workplace`
-- `private_chat`
+# Weight Design Philosophy
 
-Public and workplace contexts increase sensitivity. Private contexts reduce risk, but the adjustment is bounded so content risk is preserved.
+The scoring weights are **manually designed** rather than learned from labeled data.
 
-## Weight Design Rationale
+This decision prioritizes:
 
-Weights are manually designed for interpretability.
+- Explainability
+- Transparency
+- Robustness
+- Human interpretability
 
-High-weight dimensions:
+The importance of each dimension is summarized below.
 
-- Aggression
-- Norm Violation
+| Priority | Dimensions |
+|----------|------------|
+| High | Aggression, Norm Violation |
+| Medium | Group Generalization, Context Inappropriateness, Sarcasm / Mockery, Misinterpretability |
+| Lower | Overconfident Judgment |
 
-Medium-weight dimensions:
+The project intentionally favors interpretable scoring over purely data-driven optimization, making it easier to understand how individual factors contribute to the final backlash risk.
 
-- Group Generalization
-- Context Inappropriateness
-- Sarcasm / Mockery
-- Misinterpretability
+---
 
-Lower-weight dimension:
+# Running Locally
 
-- Overconfident Judgment
+## 1. Clone the Repository
 
-The weights are not learned from data. They are manually designed based on common social interaction patterns and optimized for transparency, controllability, and robustness across contexts.
-
-## Role of the LLM
-
-The LLM is used as a supporting component. It provides:
-
-- dimension-level estimates
-- explanations
-- rewrite suggestions
-
-The final decision is constrained by:
-
-- heuristic scoring
-- validation logic
-- weighted aggregation
-- bounded context adjustment
-
-This design reduces over-reliance on LLM output and limits hallucination-driven scoring.
-
-## Running Locally
-
-### 1. Clone the repository
-
-```powershell
+```bash
 git clone https://github.com/seungjongyoo/context-aware-backlash-risk-analyzer.git
 cd context-aware-backlash-risk-analyzer
 ```
 
-### 2. Create and activate a virtual environment
+---
+
+## 2. Create a Virtual Environment
+
+```bash
+python -m venv .venv
+```
+
+Activate the virtual environment.
+
+### Windows (PowerShell)
 
 ```powershell
-python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-If PowerShell blocks activation, run:
+If execution is blocked,
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-### 3. Install dependencies
+### Linux / macOS
+
+```bash
+source .venv/bin/activate
+```
+
+---
+
+## 3. Install Dependencies
 
 Minimum dependencies:
 
-```powershell
+```bash
 pip install numpy
 ```
 
-Recommended dependencies for better embedding quality:
+Recommended dependencies:
 
-```powershell
+```bash
 pip install numpy scikit-learn sentence-transformers torch transformers accelerate
 ```
 
-The app can still import without `scikit-learn`, `sentence-transformers`, or `transformers`, but output quality is better when they are installed.
+The analyzer automatically falls back to lightweight implementations when optional dependencies are unavailable, although embedding quality may be reduced.
 
-### 4. Optional: run the local LLM backend
+---
 
-The default LLM backend is Ollama with `qwen3:8b`.
+## 4. Run the Local LLM (Optional)
 
-Install Ollama separately, then run:
+The default LLM backend is **Ollama** using **Qwen3 8B**.
 
-```powershell
+Install Ollama separately and execute
+
+```bash
 ollama pull qwen3:8b
 ollama run qwen3:8b
 ```
 
-Keep Ollama running while using the web app.
+Keep the Ollama server running while using the analyzer.
 
-### 5. Start the web app
+If the LLM is unavailable, the pipeline automatically falls back to heuristic-only evaluation.
 
-Start the web app:
+---
 
-```powershell
+## 5. Start the Web Application
+
+```bash
 python app.py
 ```
 
-Open:
+Open
 
 ```text
 http://127.0.0.1:8000
 ```
 
-### 6. Use the analyzer
+using any modern web browser.
 
-Enter text, choose a category (`SNS`, `Email`, or `Message`), choose disclosure scope (`public` or `private`), and click `Analyze`.
+---
 
-If the LLM or optional embedding dependencies are unavailable, the pipeline falls back to heuristic behavior and records warnings in the result.
+## 6. Analyze Text
 
-## Limitations
+1. Enter the input text.
+2. Select the communication category.
+3. Select the disclosure scope.
+4. Click **Analyze**.
 
-- Weights are manually designed and may not generalize perfectly to all domains.
-- LLM outputs can vary depending on prompt, backend, and runtime conditions.
-- The system does not use large-scale labeled datasets for training.
-- Cultural and contextual nuances may not be fully captured.
-- Optional dependencies affect embedding quality and backend behavior.
+The analyzer returns
 
-## Design Considerations
+- Final Risk Score
+- Dimension Scores
+- LLM Explanation
+- Rewrite Suggestions
+- Uncertainty Estimate
 
-### Why not fully rely on the LLM?
+---
 
-LLM-only systems are flexible but can be inconsistent. This system intentionally constrains LLM outputs using validation, weighting, and deterministic components.
+# Repository Structure
 
-### Why are weights manually defined?
+```text
+context-aware-backlash-risk-analyzer/
+├── app.py
+├── pipeline.py
+├── README.md
+└── paper/
+```
 
-The goal is interpretability. Learned weights may improve accuracy but can reduce transparency. This project prioritizes explainability over pure optimization.
+---
 
-### Why is context adjustment limited?
+# Design Principles
 
-Without constraints, context can distort results. The system enforces bounded adjustment and minimum risk preservation.
+The analyzer is designed around four principles.
 
-## Key Contribution
+## Explainability
 
-This project demonstrates that combining structured heuristic scoring with LLM-based reasoning can produce a more stable, interpretable, and context-aware risk analysis system than using either approach alone.
+Every score is derived from interpretable heuristic components together with dimension-level LLM reasoning.
+
+The contribution of each stage can be understood without requiring access to model internals.
+
+---
+
+## Robustness
+
+Instead of relying on a single LLM response, the analyzer combines
+
+- heuristic scoring,
+- validation,
+- confidence-aware weighting,
+- Self-Consistency,
+
+to reduce stochastic variation.
+
+---
+
+## Context Awareness
+
+The same sentence may receive different interpretations depending on where it is communicated.
+
+The analyzer explicitly incorporates communication context throughout the scoring pipeline rather than applying context as a simple post-processing step.
+
+---
+
+## Reliability
+
+The upgraded version estimates not only the final risk score but also the uncertainty of the prediction.
+
+This enables users to distinguish between
+
+- highly consistent predictions,
+
+and
+
+- predictions that vary across multiple reasoning paths.
+
+---
+
+# Limitations
+
+Although the proposed framework improves robustness and interpretability, several limitations remain.
+
+- The scoring weights are manually designed rather than learned from data.
+- The system does not rely on large-scale labeled datasets.
+- Performance depends on the underlying LLM when LLM evaluation is enabled.
+- Cultural differences and domain-specific communication styles are not fully represented.
+- Self-Consistency improves stability but increases inference time because multiple LLM evaluations are required.
+
+---
+
+# Demonstration
+
+The analyzer provides an interactive web interface for context-aware social backlash risk assessment.
+
+A typical workflow is:
+
+```text
+Input Text
+      │
+      ▼
+Select Context
+(SNS / Email / Message)
+      │
+      ▼
+Run Analysis
+      │
+      ▼
+View Results
+```
+
+The analyzer reports:
+
+- Final Risk Score
+- Dimension-level Scores
+- LLM Explanation
+- Rewrite Suggestions
+- Uncertainty Estimate
+
+---
+
+# Technical Report
+
+This repository accompanies the following technical report.
+
+**Enhancing a Context-Aware Backlash Risk Analyzer Using Self-Consistency**
+
+The report contains:
+
+- Motivation
+- Related Work
+- System Architecture
+- Methods
+- Experimental Setup
+- Results
+- Discussion
+- Conclusion
+
+The report can be found at
+
+```text
+paper/Context_Aware_Backlash_Risk_Analyzer_Report.pdf
+```
+
+---
+
+# Citation
+
+If you use this repository for academic or research purposes, please cite the accompanying report.
+
+```bibtex
+@techreport{yoo2026,
+  title={Enhancing a Context-Aware Backlash Risk Analyzer Using Self-Consistency},
+  author={Yoo, Seungjong},
+  institution={Soongsil University},
+  year={2026}
+}
+```
+
+---
+
+# License
+
+This project is released under the MIT License.
+
+See the LICENSE file for details.
+
+---
+
+# Acknowledgements
+
+This project was developed as part of a university research project on context-aware natural language understanding.
+
+The work builds upon previous research in:
+
+- Context-aware toxicity detection
+- Contextual abuse detection
+- Self-Consistency for LLM reasoning
+
+The project extends these ideas by integrating heuristic scoring, validation, context-aware reasoning, and Self-Consistency into a unified backlash risk analysis framework.
